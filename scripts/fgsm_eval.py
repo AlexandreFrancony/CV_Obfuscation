@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision.datasets import Imagenette
-from torchvision.models import ResNet18_Weights
 import torchvision.transforms as T
 
 from src.metrics.image_quality import compute_psnr_batch, compute_ssim_batch
