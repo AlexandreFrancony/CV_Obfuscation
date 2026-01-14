@@ -99,7 +99,7 @@ Overall, the filter achieves the intended trade‑off: strong impact on model pr
 
 The following table summarizes the quantitative impact of the imperceptible FGSM filter on Imagenette for different epsilon values.
 
-| Epsilon (epsilon) | Clean accuracy | Adversarial accuracy | PSNR (dB) | SSIM  |
+| Epsilon           | Clean accuracy | Adversarial accuracy | PSNR (dB) | SSIM  |
 |-------------------|----------------|----------------------|-----------|-------|
 | 0.00              | 0.99           | 0.99                 |  ∞        | 1.000 |
 | 0.005             | 0.99           | 0.78                 | 56.0      | 0.999 |
