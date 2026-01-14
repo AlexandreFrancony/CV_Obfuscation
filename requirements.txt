@@ -1,0 +1,34 @@
+# Deep learning / vision
+torch
+torchvision
+torchaudio
+
+# NumPy / calcul scientifique
+numpy
+scipy
+
+# Manipulation de données
+pandas
+
+# Visualisation
+matplotlib
+seaborn
+
+# Traitement d’images
+opencv-python
+Pillow
+
+# Jupyter (si tu veux bosser en notebooks)
+jupyter
+ipykernel
+
+# Outils de logging et config
+tqdm
+pyyaml
+
+# Pour les métriques de qualité d'image
+scikit-image
+piq
+
+# Outils divers (débogage, dev)
+ipython
