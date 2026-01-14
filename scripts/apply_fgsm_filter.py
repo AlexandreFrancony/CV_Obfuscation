@@ -3,7 +3,6 @@ from pathlib import Path
 
 from PIL import Image
 from torchvision.utils import save_image
-import torch
 import torchvision.transforms as T
 
 from src.filters.fgsm_filter import FGSMFilter
