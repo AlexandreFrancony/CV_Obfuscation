@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Dict, List, Sequence, Union
+from typing import Callable, Dict, List, Sequence, Union
 
 import torch
 import torch.nn as nn
@@ -18,7 +18,9 @@ def setup_logging() -> None:
     )
 
 
-def get_dataset_and_dataloader(preprocess, batch_size: int = 32) -> tuple[Imagenette, DataLoader]:
+def get_dataset_and_dataloader(
+    preprocess, batch_size: int = 32
+) -> tuple[Imagenette, DataLoader]:
     data_root = Path("data") / "imagenette"
     dataset = Imagenette(
         root=str(data_root),
@@ -104,40 +106,37 @@ def evaluate_fgsm(epsilon: float = 0.01, batch_size: int = 32) -> None:
     loss_fn = nn.CrossEntropyLoss()
 
     model.eval()
+
+    # Forward restreint aux 10 classes (B, 10), aligné avec labels 0-9
+    def forward_restricted(x: torch.Tensor) -> torch.Tensor:
+        outputs = model(x)  # (B, 1000)
+        logits_subset = outputs.index_select(dim=1, index=imnet_indices)  # (B, 10)
+        return logits_subset
+
     for i, (images, labels) in enumerate(dataloader):
         images = images.to(device)
         labels = labels.to(device)
 
-        # --- Clean predictions (restricting to 10 classes) ---
+        # --- Clean predictions ---
         with torch.no_grad():
-            outputs_clean = model(images)           # (B, 1000)
-            logits_clean_subset = outputs_clean.index_select(
-                dim=1, index=imnet_indices
-            )                                      # (B, 10)
+            logits_clean_subset = forward_restricted(images)  # (B, 10)
             _, preds_clean = torch.max(logits_clean_subset, dim=1)
 
         clean_correct += (preds_clean == labels).sum().item()
 
-        # --- Adversarial examples (FGSM on full logits) ---
-        # On attaque sur les 1000 classes, mais on évaluera sur les 10
+        # --- Adversarial examples (FGSM sur logits restreints) ---
         images_adv = fgsm_attack(
-            model=model,
+            model=None,              # on n'utilise pas model directement ici
             images=images,
-            labels=labels,        # labels restent 0-9, mais la loss est calculée sur logits restreints juste après
+            labels=labels,
             epsilon=epsilon,
-            loss_fn=None,         # on va redéfinir la loss pour être cohérent avec les 10 classes
+            loss_fn=loss_fn,
+            forward_fn=forward_restricted,  # nouvelle signature: FGSM attaque sur logits (B,10)
         )
 
-        # IMPORTANT: recalculer la loss sur les logits restreints pour FGSM ?
-        # Pour rester simple, on peut modifier fgsm_attack plus tard pour qu'il prenne une loss custom.
-        # Ici, on réutilise l'implémentation actuelle (loss sur 1000 classes), ce qui donne déjà un bon signal.
-
-        # --- Prédictions adversariales (restreintes à 10 classes) ---
+        # --- Prédictions adversariales ---
         with torch.no_grad():
-            outputs_adv = model(images_adv)        # (B, 1000)
-            logits_adv_subset = outputs_adv.index_select(
-                dim=1, index=imnet_indices
-            )                                      # (B, 10)
+            logits_adv_subset = forward_restricted(images_adv)  # (B, 10)
             _, preds_adv = torch.max(logits_adv_subset, dim=1)
 
         adv_correct += (preds_adv == labels).sum().item()
@@ -159,5 +158,7 @@ def evaluate_fgsm(epsilon: float = 0.01, batch_size: int = 32) -> None:
 
 
 if __name__ == "__main__":
-    # Tu pourras jouer avec epsilon (0.001, 0.005, 0.01, 0.02, etc.)
-    evaluate_fgsm(epsilon=0.01)
+    for eps in [0.001, 0.005, 0.01, 0.02, 0.05]:
+        print("\n" + "=" * 60)
+        print(f"Running FGSM eval with epsilon={eps}")
+        evaluate_fgsm(epsilon=eps)
