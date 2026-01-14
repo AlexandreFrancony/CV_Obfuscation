@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Callable, Dict, List, Sequence, Union, Tuple
+from typing import Dict, List, Sequence, Union, Tuple
 
 import torch
 import torch.nn as nn
