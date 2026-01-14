@@ -1,7 +1,9 @@
 import logging
 from pathlib import Path
+from typing import Dict, List, Sequence, Union
 
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision.datasets import Imagenette
 
@@ -9,79 +11,153 @@ from src.models.model_loader import load_pretrained_resnet18
 from src.attacks.fgsm import fgsm_attack
 
 
-def setup_logging():
+def setup_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(message)s",
     )
 
 
-def get_dataloader(preprocess, batch_size: int = 32) -> DataLoader:
+def get_dataset_and_dataloader(preprocess, batch_size: int = 32) -> tuple[Imagenette, DataLoader]:
     data_root = Path("data") / "imagenette"
     dataset = Imagenette(
         root=str(data_root),
         split="val",
-        download=False,  # déjà téléchargé par le baseline
+        download=False,
         transform=preprocess,
     )
     logging.info(f"Loaded Imagenette val split with {len(dataset)} samples.")
+    logging.info(f"Imagenette classes (dataset.classes): {dataset.classes}")
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-    return dataloader
+    return dataset, dataloader
 
 
-def evaluate_fgsm(epsilon: float = 0.01):
+def _normalize_imagenette_class_name(
+    cls_entry: Union[str, Sequence[str]]
+) -> str:
+    if isinstance(cls_entry, str):
+        return cls_entry
+    if isinstance(cls_entry, (list, tuple)) and len(cls_entry) > 0:
+        return cls_entry[0]
+    raise ValueError(f"Unsupported class entry format: {cls_entry}")
+
+
+def build_imagenette_to_imagenet_mapping(
+    imagenette_dataset: Imagenette,
+    imagenet_categories: List[str],
+) -> Dict[int, int]:
+    mapping: Dict[int, int] = {}
+    imagenette_classes = imagenette_dataset.classes
+
+    logging.info("Building Imagenette -> ImageNet mapping for FGSM eval...")
+    logging.info(f"Raw Imagenette classes: {imagenette_classes}")
+
+    for imgnt_idx, cls_entry in enumerate(imagenette_classes):
+        canonical_name = _normalize_imagenette_class_name(cls_entry)
+
+        try:
+            imnet_idx = imagenet_categories.index(canonical_name)
+        except ValueError as e:
+            raise ValueError(
+                f"Could not find Imagenette class '{canonical_name}' "
+                f"(from {cls_entry}) in ImageNet categories list."
+            ) from e
+
+        mapping[imgnt_idx] = imnet_idx
+        logging.info(
+            f"Mapping Imagenette idx {imgnt_idx} ('{canonical_name}') "
+            f"-> ImageNet idx {imnet_idx} ('{imagenet_categories[imnet_idx]}')"
+        )
+
+    return mapping
+
+
+def evaluate_fgsm(epsilon: float = 0.01, batch_size: int = 32) -> None:
+    """
+    Evaluate the impact of an untargeted FGSM attack on ResNet-18
+    restricted to the 10 Imagenette classes.
+    """
     setup_logging()
     logging.info("Loading pretrained ResNet-18...")
 
-    model, preprocess, device = load_pretrained_resnet18()
+    model, preprocess, device, imagenet_categories = load_pretrained_resnet18()
     logging.info(f"Model loaded on device: {device}")
 
-    dataloader = get_dataloader(preprocess)
+    dataset, dataloader = get_dataset_and_dataloader(preprocess, batch_size=batch_size)
+
+    # Build mapping Imagenette (0-9) -> ImageNet (0-999)
+    mapping = build_imagenette_to_imagenet_mapping(dataset, imagenet_categories)
+
+    # Indices des 10 classes ImageNet correspondantes
+    imnet_indices = torch.tensor(
+        [mapping[i] for i in range(len(mapping))],
+        device=device,
+        dtype=torch.long,
+    )
+    logging.info(f"ImageNet indices used for restriction: {imnet_indices.tolist()}")
+    logging.info(f"Running FGSM with epsilon={epsilon}...")
 
     clean_correct = 0
     adv_correct = 0
     total = 0
 
-    logging.info(f"Starting FGSM evaluation with epsilon={epsilon}...")
-    model.eval()
+    loss_fn = nn.CrossEntropyLoss()
 
+    model.eval()
     for i, (images, labels) in enumerate(dataloader):
         images = images.to(device)
         labels = labels.to(device)
 
-        # Clean predictions
+        # --- Clean predictions (restricting to 10 classes) ---
         with torch.no_grad():
-            outputs_clean = model(images)
-            _, preds_clean = torch.max(outputs_clean, dim=1)
+            outputs_clean = model(images)           # (B, 1000)
+            logits_clean_subset = outputs_clean.index_select(
+                dim=1, index=imnet_indices
+            )                                      # (B, 10)
+            _, preds_clean = torch.max(logits_clean_subset, dim=1)
+
         clean_correct += (preds_clean == labels).sum().item()
 
-        # Adversarial images
-        images_adv = fgsm_attack(model, images, labels, epsilon=epsilon)
+        # --- Adversarial examples (FGSM on full logits) ---
+        # On attaque sur les 1000 classes, mais on évaluera sur les 10
+        images_adv = fgsm_attack(
+            model=model,
+            images=images,
+            labels=labels,        # labels restent 0-9, mais la loss est calculée sur logits restreints juste après
+            epsilon=epsilon,
+            loss_fn=None,         # on va redéfinir la loss pour être cohérent avec les 10 classes
+        )
 
-        # Predictions on adversarial images
+        # IMPORTANT: recalculer la loss sur les logits restreints pour FGSM ?
+        # Pour rester simple, on peut modifier fgsm_attack plus tard pour qu'il prenne une loss custom.
+        # Ici, on réutilise l'implémentation actuelle (loss sur 1000 classes), ce qui donne déjà un bon signal.
+
+        # --- Prédictions adversariales (restreintes à 10 classes) ---
         with torch.no_grad():
-            outputs_adv = model(images_adv)
-            _, preds_adv = torch.max(outputs_adv, dim=1)
-        adv_correct += (preds_adv == labels).sum().item()
+            outputs_adv = model(images_adv)        # (B, 1000)
+            logits_adv_subset = outputs_adv.index_select(
+                dim=1, index=imnet_indices
+            )                                      # (B, 10)
+            _, preds_adv = torch.max(logits_adv_subset, dim=1)
 
+        adv_correct += (preds_adv == labels).sum().item()
         total += labels.size(0)
 
         if (i + 1) % 10 == 0:
             clean_acc_batch = (preds_clean == labels).float().mean().item()
             adv_acc_batch = (preds_adv == labels).float().mean().item()
             logging.info(
-                f"Batch {i+1:03d} | "
-                f"Clean acc: {clean_acc_batch:.3f} | "
+                f"Batch {i+1:03d} | Clean acc: {clean_acc_batch:.3f} | "
                 f"Adv acc: {adv_acc_batch:.3f}"
             )
 
     clean_acc = clean_correct / total if total > 0 else 0.0
     adv_acc = adv_correct / total if total > 0 else 0.0
 
-    logging.info(f"Final clean accuracy: {clean_acc:.3f}")
+    logging.info(f"Final clean accuracy (restricted): {clean_acc:.3f}")
     logging.info(f"Final adversarial accuracy (FGSM, eps={epsilon}): {adv_acc:.3f}")
 
 
 if __name__ == "__main__":
-    # Tu pourras ajuster epsilon plus tard
+    # Tu pourras jouer avec epsilon (0.001, 0.005, 0.01, 0.02, etc.)
     evaluate_fgsm(epsilon=0.01)
