@@ -16,25 +16,50 @@ def setup_logging() -> None:
     )
 
 
-def get_dataset_and_dataloader(preprocess, batch_size: int = 32) -> tuple[Imagenette, DataLoader]:
+from typing import Tuple
+from pathlib import Path
+import logging
+
+import torch
+from torch.utils.data import DataLoader
+from torchvision.datasets import Imagenette
+
+
+def get_dataset_and_dataloader(
+    preprocess, batch_size: int = 32
+) -> Tuple[Imagenette, DataLoader]:
     """
     Load the Imagenette validation split and return both the dataset
     (for class names) and the dataloader (for evaluation).
+
+    If the dataset is not found on disk, a clear log message is emitted
+    explaining how to enable download.
     """
     data_root = Path("data") / "imagenette"
 
-    dataset = Imagenette(
-        root=str(data_root),
-        split="val",
-        download=False,
-        transform=preprocess,
-    )
+    try:
+        dataset = Imagenette(
+            root=str(data_root),
+            split="val",
+            download=False,  # set to True on a new machine to auto-download
+            transform=preprocess,
+        )
+    except RuntimeError as e:
+        logging.error(
+            "Imagenette dataset not found at '%s'.\n"
+            "If you are running this project on a new machine, "
+            "edit the function `get_dataset_and_dataloader` in `scripts/baseline_inference.py` "
+            "and set `download=True` in the `Imagenette(...)` call (line 44), "
+            "then rerun the script.",
+            data_root,
+        )
+        raise e
+
     logging.info(f"Loaded Imagenette val split with {len(dataset)} samples.")
     logging.info(f"Imagenette classes (dataset.classes): {dataset.classes}")
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     return dataset, dataloader
-
 
 def _normalize_imagenette_class_name(
     cls_entry: Union[str, Sequence[str]]

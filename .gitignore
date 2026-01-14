@@ -46,7 +46,6 @@ datasets/
 outputs/
 runs/
 checkpoints/
-models/
 *.pth
 *.pt
 
