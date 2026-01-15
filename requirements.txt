@@ -3,34 +3,34 @@ torch
 torchvision
 torchaudio
 
-# NumPy / calcul scientifique
+# NumPy / scientific computing
 numpy
 scipy
 
-# Manipulation de données
+# Data manipulation
 pandas
 
-# Visualisation
+# Visualization
 matplotlib
 seaborn
 
-# Traitement d’images
+# Image processing
 opencv-python
 Pillow
 
-# Jupyter (si tu veux bosser en notebooks)
+# Jupyter / notebooks
 jupyter
 ipykernel
 
-# Outils de logging et config
+# Logging and configuration
 tqdm
 pyyaml
 
-# Pour les métriques de qualité d'image
+# Image quality metrics
 scikit-image
 piq
 
-# Outils divers (débogage, dev)
+# Dev / debugging
 ipython
 
 # Jupyter / kernels

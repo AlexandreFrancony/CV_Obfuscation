@@ -35,7 +35,7 @@ logs/
 .jupyter/
 
 # Données locales (si gros datasets en local)
-data/
+data/imagenette
 datasets/
 *.h5
 *.hdf5
@@ -46,7 +46,6 @@ datasets/
 outputs/
 runs/
 checkpoints/
-models/
 *.pth
 *.pt
 
